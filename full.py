@@ -1,15 +1,19 @@
-import pygame
-import random
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+from sklearn.preprocessing import StandardScaler
 import numpy as np
+import pandas as pd
+from ta import add_all_ta_features
+from transformers import TimeSeriesTransformerModel, TimeSeriesTransformerConfig
+import pygame
 import gym
 from gym import spaces
 import websocket
 import json
 import threading
 from stable_baselines3 import PPO
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import math
 from collections import deque
 import time
@@ -203,7 +207,7 @@ def on_message(ws, message):
         open_interest = float(json_message['q'])  # Just for example
         price_data.append(price)
         open_interest_data.append(open_interest)
-    except Exception as e:
+except Exception as e:
         print(f"Error processing message: {e}")
 
 def on_error(ws, error):
@@ -234,61 +238,61 @@ ws_thread = threading.Thread(target=start_websocket)
 ws_thread.daemon = True
 ws_thread.start()
 
-# MCTS Node and MCTS classes (refactored)
-class Node:
-    def __init__(self, prior, to_play, state):
-        self.visit_count = 0
-        self.to_play = to_play
-        self.prior = prior
-        self.value_sum = 0
-        self.children = {}
-        self.state = state
+# Advanced data preprocessing
+def preprocess_data(df):
+    df = add_all_ta_features(df, open="open", high="high", low="low", close="close", volume="volume")
+    return df
 
-    def expanded(self):
-        return len(self.children) > 0
+# Custom dataset
+class TradingDataset(Dataset):
+    def __init__(self, data, sequence_length):
+        self.data = torch.FloatTensor(data)
+        self.sequence_length = sequence_length
 
-    def value(self):
-        return self.value_sum / self.visit_count if self.visit_count > 0 else 0
+    def __len__(self):
+        return len(self.data) - self.sequence_length
 
-    def select_child(self):
-        best_score = -np.inf
-        best_action, best_child = None, None
+    def __getitem__(self, idx):
+        return self.data[idx:idx+self.sequence_length]
 
-        for action, child in self.children.items():
-            score = self.ucb_score(child)
-            if score > best_score:
-                best_score = score
-                best_action = action
-                best_child = child
+# Advanced model architecture
+class AdvancedTradingModel(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, num_heads, dropout):
+        super(AdvancedTradingModel, self).__init__()
+        self.config = TimeSeriesTransformerConfig(
+            d_model=hidden_size,
+            encoder_layers=num_layers,
+            decoder_layers=num_layers,
+            encoder_attention_heads=num_heads,
+            decoder_attention_heads=num_heads,
+            dropout=dropout,
+            use_cache=False,
+        )
+        self.transformer = TimeSeriesTransformerModel(self.config)
+        self.fc = nn.Linear(hidden_size, 3)  # 3 actions: buy, sell, hold
 
-        return best_action, best_child
+    def forward(self, x):
+        transformer_output = self.transformer(inputs_embeds=x).last_hidden_state
+        return self.fc(transformer_output[:, -1, :])
 
-    def ucb_score(self, child):
-        prior_score = child.prior * math.sqrt(self.visit_count) / (child.visit_count + 1)
-        value_score = -child.value() if child.visit_count > 0 else 0
-        return value_score + prior_score
+    def predict(self, state):
+        state = torch.FloatTensor(state).unsqueeze(0)
+        transformer_output = self.transformer(inputs_embeds=state).last_hidden_state
+        action_probs = self.fc(transformer_output[:, -1, :])
+        return F.softmax(action_probs, dim=-1).detach().numpy().flatten()
 
-    def expand(self, model, game, state, to_play):
-        action_probs, value = model.predict(state)
-        valid_moves = game.get_valid_moves(state)
-        action_probs = action_probs * valid_moves
-        action_probs /= np.sum(action_probs)
-
-        for a, prob in enumerate(action_probs):
-            if prob > 0:
-                self.children[a] = Node(prior=prob, to_play=-to_play, state=None)
-
-class MCTS:
-    def __init__(self, game, model, args):
-        self.game = game
+# Improved MCTS
+class ImprovedMCTS:
+    def __init__(self, env, model, num_simulations=50):
+        self.env = env
         self.model = model
-        self.args = args
+        self.num_simulations = num_simulations
 
-    def run(self, state, to_play, num_simulations=50):
-        root = Node(0, to_play, state)
-        root.expand(self.model, self.game, state, to_play)
+    def search(self, state):
+        root = Node(0, 1, state)
+        root.expand(self.model, self.env, state, 1)
 
-        for _ in range(num_simulations):
+        for _ in range(self.num_simulations):
             node = root
             search_path = [node]
 
@@ -298,26 +302,26 @@ class MCTS:
 
             parent = search_path[-2]
             state = parent.state
-            next_state, _ = self.game.get_next_state(state, to_play, action)
-            value = self.game.get_reward_for_player(next_state, to_play)
+            next_state, _ = self.env.get_next_state(state, 1, action)
+            value = self.env.get_reward_for_player(next_state, 1)
 
             if value is None:
-                node.expand(self.model, self.game, next_state, -to_play)
+                node.expand(self.model, self.env, next_state, -1)
                 value, _ = self.model.predict(next_state)
 
-            self.backpropagate(search_path, value, to_play)
+            self.backpropagate(search_path, value, 1)
 
-        return root
+        return max(root.children.items(), key=lambda x: x[1].visit_count)[0]
 
     def backpropagate(self, search_path, value, to_play):
         for node in reversed(search_path):
             node.value_sum += value if node.to_play == to_play else -value
             node.visit_count += 1
 
-# Trading Environment
-class TradingEnv(gym.Env):
+# Improved trading environment
+class ImprovedTradingEnv(gym.Env):
     def __init__(self):
-        super(TradingEnv, self).__init__()
+        super(ImprovedTradingEnv, self).__init__()
         self.action_space = spaces.Discrete(3)  # Buy, Sell, Hold
         self.observation_space = spaces.Box(low=0, high=1, shape=(1000,), dtype=np.float32)
         self.reset()
@@ -365,27 +369,6 @@ class TradingEnv(gym.Env):
     def get_reward_for_player(self, state, player):
         return None  # Reward is calculated in the step function
 
-# Neural Network Model
-class TradingNN(nn.Module):
-    def __init__(self, input_size, action_size):
-        super(TradingNN, self).__init__()
-        self.fc1 = nn.Linear(input_size, 128)
-        self.fc2 = nn.Linear(128, 64)
-        self.policy_head = nn.Linear(64, action_size)
-        self.value_head = nn.Linear(64, 1)
-
-    def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        policy = F.softmax(self.policy_head(x), dim=1)
-        value = torch.tanh(self.value_head(x))
-        return policy, value
-
-    def predict(self, state):
-        state = torch.FloatTensor(state).unsqueeze(0)
-        policy, value = self.forward(state)
-        return policy.detach().numpy().flatten(), value.item()
-
 # Visualization
 def draw_chart(screen, data, color):
     if len(data) < 2:
@@ -403,43 +386,24 @@ def calculate_liquidation_levels(price_data, open_interest_data):
     high_oi_levels = [price for price, oi in zip(price_data, open_interest_data) if oi > oi_threshold]
     return high_oi_levels
 
-# Main game loop
-def main():
+# Main training loop
+def train():
     binance_client = BinanceClient(API_KEY, API_SECRET, BASE_URL)
-    env = TradingEnv()
-    model = TradingNN(1000, 3)
-    mcts = MCTS(env, model, {'num_simulations': 50})
-    ppo_model = PPO('MlpPolicy', env, verbose=1)
+    env = ImprovedTradingEnv()
+    model = AdvancedTradingModel(input_size=100, hidden_size=64, num_layers=4, num_heads=4, dropout=0.1)
+    optimizer = torch.optim.Adam(model.parameters())
+    mcts = ImprovedMCTS(env, model)
 
     running = True
     clock = pygame.time.Clock()
 
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-
-        screen.fill(BLACK)
-
-        # Update and draw price chart
-        draw_chart(screen, list(price_data), GREEN)
-
-        # Calculate and draw liquidation levels
-        liquidation_levels = calculate_liquidation_levels(list(price_data), list(open_interest_data))
-        draw_liquidation_levels(screen, liquidation_levels)
-
-        # Run MCTS and PPO
-        if len(price_data) >= 1000:
-            state = env.reset()
-            root = mcts.run(state, 1)
-            action = max(root.children.items(), key=lambda x: x[1].visit_count)[0]
-
-            # PPO action
-            ppo_action, _ = ppo_model.predict(state)
-
-            # Take action in environment
-            obs, reward, done, _ = env.step(action)
-
+    for episode in range(10000):
+        state = env.reset()
+        done = False
+        while not done:
+            action = mcts.search(state)
+            next_state, reward, done, _ = env.step(action)
+            
             # Execute trade with Binance API
             if action == 0:
                 binance_client.set_leverage("BTCUSDT", 10)
@@ -450,12 +414,27 @@ def main():
             else:
                 print("Hold action taken")
 
-            # Train PPO model
-            ppo_model.learn(total_timesteps=1)
+            # Prepare the input for the model (here, we assume state is already preprocessed)
+            state_tensor = torch.FloatTensor(state).unsqueeze(0)
 
-        # Display metrics
+            # Model training
+            model.train()
+            optimizer.zero_grad()
+            predicted_action_probs = model(state_tensor)
+            loss = F.cross_entropy(predicted_action_probs, torch.tensor([action]))
+            loss.backward()
+            optimizer.step()
+
+            state = next_state
+
+        # Visualization update
+        screen.fill(BLACK)
+        draw_chart(screen, list(price_data), GREEN)
+        liquidation_levels = calculate_liquidation_levels(list(price_data), list(open_interest_data))
+        draw_liquidation_levels(screen, liquidation_levels)
+
         font = pygame.font.Font(None, 36)
-        metrics_text = f"Balance: {env.balance:.2f}, Position: {env.position}"
+        metrics_text = f"Episode: {episode}, Balance: {env.balance:.2f}, Position: {env.position}"
         text = font.render(metrics_text, True, WHITE)
         screen.blit(text, (20, 20))
 
@@ -465,4 +444,4 @@ def main():
     pygame.quit()
 
 if __name__ == "__main__":
-    main()
+    train()
