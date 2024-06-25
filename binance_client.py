@@ -9,6 +9,7 @@ import json
 
 logger = logging.getLogger(__name__)
 
+
 class BinanceClient:
     def __init__(self, api_key, api_secret, base_url):
         self.api_key = api_key
@@ -22,7 +23,8 @@ class BinanceClient:
                 data = await response.json()
                 return data['serverTime']
             else:
-                raise Exception(f"Failed to get server time: {response.status}")
+                raise Exception(f"Failed to get server time: {
+                                response.status}")
 
     async def _request(self, method, path, params=None):
         url = f"{self.base_url}{path}"
@@ -36,7 +38,8 @@ class BinanceClient:
         params['timestamp'] = server_time
 
         query_string = urlencode(params)
-        signature = hmac.new(self.api_secret.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
+        signature = hmac.new(self.api_secret.encode(
+            'utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
         params['signature'] = signature
 
         async with self.session.request(method, url, params=params, headers=headers) as response:
@@ -48,7 +51,8 @@ class BinanceClient:
     async def get_exchange_info(self, symbol):
         path = "/fapi/v1/exchangeInfo"
         data = await self._request("GET", path)
-        symbol_info = next((s for s in data['symbols'] if s['symbol'] == symbol), None)
+        symbol_info = next(
+            (s for s in data['symbols'] if s['symbol'] == symbol), None)
         if not symbol_info:
             raise ValueError(f"Symbol {symbol} not found")
         return symbol_info

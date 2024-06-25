@@ -1,114 +1,145 @@
 import asyncio
 import pygame
 from trading_env import BreakoutEnv
-from model import initialize_model_and_data, AdvancedTradingModel
+from model import AdvancedTradingModel, AsyncFinancialDataFetcher, initialize_model_and_data
 import torch
 import torch.optim as optim
-from visualization import init_pygame, update_display
+from visualization import init_pygame, update_display, improved_update_display
 from config import SYMBOL, WIDTH, HEIGHT, API_KEY, API_SECRET, BASE_URL
 import logging
 from binance_client import BinanceClient
+import cProfile
+import pstats
+import io
+import os
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+
+def save_model(model, optimizer, episode, path='model_checkpoint.pth'):
+    torch.save({
+        'episode': episode,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+    }, path)
+    print(f"Model saved at episode {episode}")
+
+
+def load_model(model, optimizer, path='model_checkpoint.pth'):
+    if os.path.exists(path):
+        checkpoint = torch.load(path)
+
+        # Check if the saved model has the temperature parameter
+        if 'temperature' not in checkpoint['model_state_dict']:
+            print("Old model version detected. Initializing temperature parameter.")
+            checkpoint['model_state_dict']['temperature'] = torch.ones(1) * 1.0
+
+        model.load_state_dict(checkpoint['model_state_dict'])
+
+        # Instead of loading the optimizer state, we'll reinitialize it
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+        start_episode = checkpoint['episode']
+        print(f"Model loaded from episode {start_episode}")
+        return start_episode, optimizer
+    else:
+        print("No saved model found. Starting from scratch.")
+        return 0, optimizer
+
+
 async def main():
-    # Initialize Binance Client
-    binance_client = BinanceClient(API_KEY, API_SECRET, BASE_URL)
-    logger.info("Binance client initialized.")
-
+    binance_client = None
     try:
+        binance_client = BinanceClient(API_KEY, API_SECRET, BASE_URL)
+        logger.info("Binance client initialized.")
+
         model, data_fetcher, fetch_task = await initialize_model_and_data(SYMBOL, binance_client)
-        logger.info(f"Model initialized. Input size: {model.fc1.in_features}")
-    except ValueError as e:
-        logger.error(f"Initialization failed: {e}")
-        return
+        logger.info("Model initialized.")
 
-    # Initialize Pygame
-    screen = init_pygame()
-    clock = pygame.time.Clock()
+        optimizer = optim.RMSprop(
+            model.parameters(), lr=0.00025, alpha=0.99, eps=1e-08)
 
-    env = BreakoutEnv(data_fetcher, width=WIDTH, height=HEIGHT)
-    optimizer = torch.optim.Adam(model.parameters())
+        start_episode, optimizer = load_model(model, optimizer)
 
-    logger.info(f"Environment initialized. Observation space: {env.observation_space}")
-    logger.info(f"Action space: {env.action_space}")
+        screen = init_pygame()
+        clock = pygame.time.Clock()
 
-    num_episodes = 1000
-    for episode in range(num_episodes):
-        state = env.reset()
-        done = False
-        total_reward = 0
+        env = BreakoutEnv(data_fetcher, width=WIDTH, height=HEIGHT)
 
-        logger.info(f"Starting episode {episode + 1}")
-        logger.debug(f"Initial state shape: {state.shape}")
+        num_episodes = 1000
+        save_interval = 50
 
-        while not done:
-            state_tensor = torch.FloatTensor(state).unsqueeze(0)
-            logger.debug(f"State tensor shape: {state_tensor.shape}")
+        for episode in range(start_episode, num_episodes):
+            state = await env.reset()
+            done = False
+            total_reward = 0
 
-            # Reinitialize the model if the input size changes
-            expected_size = len(data_fetcher.price_data) + len(data_fetcher.liquidation_levels)
-            if state_tensor.shape[1] != expected_size:
-                logger.warning(f"Unexpected state shape: {state_tensor.shape}, expected: (1, {expected_size})")
-                logger.warning(f"Price data length: {len(data_fetcher.price_data)}")
-                logger.warning(f"Liquidation levels length: {len(data_fetcher.liquidation_levels)}")
+            logger.info(f"Starting episode {episode + 1}")
 
-                # Reinitialize the model
-                model = AdvancedTradingModel(input_size=expected_size, hidden_size=64, output_size=3)
-                optimizer = torch.optim.Adam(model.parameters())
-                logger.info(f"Reinitialized model with input size: {expected_size}")
-                continue
+            while not done:
+                try:
+                    action = model.get_action(state, env)
+                    next_state, reward, done, info = await env.step(action)
 
-            action_probs = model(state_tensor)
-            action = torch.argmax(action_probs).item()
+                    reward = max(min(reward, 1), -1)  # Reward clipping
 
-            next_state, reward, done, info = await env.step(action)
-            total_reward += reward
-            logger.debug(f"Action: {action}, Reward: {reward}, Done: {done}")
+                    total_reward += reward
 
-            # Train the model
-            optimizer.zero_grad()
-            loss = -torch.log(action_probs[0][action]) * reward
-            loss.backward()
-            optimizer.step()
+                    optimizer.zero_grad()
+                    state_tensor = torch.FloatTensor(state).unsqueeze(0)
+                    log_probs = model(state_tensor)
 
-            state = next_state
+                    loss = -log_probs[0][action] * reward
 
-            # Update the display
-            update_display(screen, env.paddle_x, env.ball_x, env.ball_y, env.blocks, info)
+                    if torch.isnan(loss) or torch.isinf(loss):
+                        logger.warning(f"NaN or Inf loss detected. State: {
+                                       state}, Action: {action}, Reward: {reward}")
+                        continue
 
-            # Handle Pygame events
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    logger.info("Pygame QUIT event received. Shutting down.")
-                    pygame.quit()
-                    fetch_task.cancel()
-                    await binance_client.close()
-                    return
+                    loss.backward()
 
-            # Control the frame rate
-            clock.tick(60)
+                    torch.nn.utils.clip_grad_value_(model.parameters(), 1.0)
 
-        logger.info(f"Episode {episode + 1} finished with score: {info['score']} and reward: {total_reward}")
+                    optimizer.step()
 
-    logger.info("Training completed. Shutting down.")
-    pygame.quit()
-    fetch_task.cancel()
-    await binance_client.close()
+                    state = next_state
 
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("KeyboardInterrupt received. Shutting down.")
+                    improved_update_display(
+                        screen, env.paddle_x, env.ball_x, env.ball_y, env.blocks, info)
+
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT:
+                            logger.info(
+                                "Pygame QUIT event received. Shutting down.")
+                            return
+
+                    clock.tick(60)
+
+                except Exception as e:
+                    logger.error(f"Error during episode: {e}")
+                    break
+
+        logger.info(f"Episode {
+                    episode + 1} finished with score: {info['score']} and reward: {total_reward}")
+
+        # Add a small delay between episodes to allow for screen updates
+        await asyncio.sleep(0.1)
+
+        if (episode + 1) % save_interval == 0:
+            save_model(model, optimizer, episode + 1)
+
+        logger.info("Training completed. Shutting down.")
+
     except Exception as e:
         logger.exception(f"An unexpected error occurred: {e}")
+    finally:
+        pygame.quit()
+        if fetch_task:
+            fetch_task.cancel()
+        if binance_client:
+            await binance_client.close()
 
-
-
-
-
-
-
-
+if __name__ == "__main__":
+    asyncio.run(main())

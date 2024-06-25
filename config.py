@@ -6,8 +6,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Binance API credentials
-API_KEY = os.getenv("BINANCE_API_KEY", "uKQtYQWg6wERwMP2gZmXGVoxW2IGx2iPomvUXLVd8hA0awdFyifgBjaQcezWaLiS")
-API_SECRET = os.getenv("BINANCE_API_SECRET", "p6xRauRC2NmD3JMzrHKFDnUKln2xxQ8pyISDDnrShK4smI8vIsqgaWGfeDRCqvHh")
+API_KEY = os.getenv(
+    "BINANCE_API_KEY", "uKQtYQWg6wERwMP2gZmXGVoxW2IGx2iPomvUXLVd8hA0awdFyifgBjaQcezWaLiS")
+API_SECRET = os.getenv(
+    "BINANCE_API_SECRET", "p6xRauRC2NmD3JMzrHKFDnUKln2xxQ8pyISDDnrShK4smI8vIsqgaWGfeDRCqvHh")
 BASE_URL = "https://fapi.binance.com"
 
 # Trading settings
