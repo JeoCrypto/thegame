@@ -9,12 +9,14 @@ from config import SYMBOL, WIDTH, HEIGHT
 import logging
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 async def main():
     try:
         model, data_fetcher, fetch_task = await initialize_model_and_data(SYMBOL)
+        logger.info(f"Model initialized. Input size: {model.fc1.in_features}")
     except ValueError as e:
-        print(f"Initialization failed: {e}")
+        logger.error(f"Initialization failed: {e}")
         return
 
     # Initialize Pygame
@@ -24,19 +26,35 @@ async def main():
     env = BreakoutEnv(data_fetcher, width=WIDTH, height=HEIGHT)
     optimizer = torch.optim.Adam(model.parameters())
 
+    logger.info(f"Environment initialized. Observation space: {env.observation_space}")
+    logger.info(f"Action space: {env.action_space}")
+
     num_episodes = 1000
     for episode in range(num_episodes):
         state = env.reset()
         done = False
         total_reward = 0
 
+        logger.info(f"Starting episode {episode + 1}")
+        logger.debug(f"Initial state shape: {state.shape}")
+
         while not done:
             state_tensor = torch.FloatTensor(state).unsqueeze(0)
+            logger.debug(f"State tensor shape: {state_tensor.shape}")
+
+            expected_size = len(data_fetcher.price_data) + len(data_fetcher.liquidation_levels)
+            if state_tensor.shape[1] != expected_size:
+                logger.warning(f"Unexpected state shape: {state_tensor.shape}, expected: (1, {expected_size})")
+                logger.warning(f"Price data length: {len(data_fetcher.price_data)}")
+                logger.warning(f"Liquidation levels length: {len(data_fetcher.liquidation_levels)}")
+                continue
+
             action_probs = model(state_tensor)
             action = torch.argmax(action_probs).item()
 
             next_state, reward, done, info = env.step(action)
             total_reward += reward
+            logger.debug(f"Action: {action}, Reward: {reward}, Done: {done}")
 
             # Train the model
             optimizer.zero_grad()
@@ -47,11 +65,12 @@ async def main():
             state = next_state
 
             # Update the display
-            update_display(screen, env.paddle_x, env.ball_x, env.ball_y, env.blocks, info['score'])
+            update_display(screen, env.paddle_x, env.ball_x, env.ball_y, env.blocks, info)
 
             # Handle Pygame events
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
+                    logger.info("Pygame QUIT event received. Shutting down.")
                     pygame.quit()
                     fetch_task.cancel()
                     return
@@ -59,10 +78,17 @@ async def main():
             # Control the frame rate
             clock.tick(60)
 
-        print(f"Episode {episode + 1} finished with score: {info['score']} and reward: {total_reward}")
+        logger.info(f"Episode {episode + 1} finished with score: {info['score']} and reward: {total_reward}")
 
+    logger.info("Training completed. Shutting down.")
     pygame.quit()
     fetch_task.cancel()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("KeyboardInterrupt received. Shutting down.")
+    except Exception as e:
+        logger.exception(f"An unexpected error occurred: {e}")
+

@@ -5,12 +5,11 @@ import torch.nn.functional as F
 import asyncio
 import time
 from collections import deque
-from binance_client import BinanceClient
+from binance_client import BinanceClient  # Ensure this is correctly implemented
 from config import API_KEY, API_SECRET, BASE_URL, SYMBOL
 import logging
 
 logger = logging.getLogger(__name__)
-
 
 class AdvancedTradingModel(nn.Module):
     def __init__(self, input_size, hidden_size, output_size):
@@ -23,7 +22,6 @@ class AdvancedTradingModel(nn.Module):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         return self.fc3(x)
-
 
 class FinancialDataFetcher:
     def __init__(self, symbol=SYMBOL, max_data_points=1000):
@@ -39,10 +37,14 @@ class FinancialDataFetcher:
 
     async def fetch_real_time_data(self):
         logger.info(f"Starting to fetch real-time data for {self.symbol}")
-        async for msg in self.binance_client.create_websocket_connection(f"{self.symbol.lower()}@trade"):
-            price = float(msg['p'])
-            self.price_data.append(price)
-            logger.debug(f"Received price: {price}. Total prices: {len(self.price_data)}")
+        try:
+            async for msg in self.binance_client.create_websocket_connection(f"{self.symbol.lower()}@trade"):
+                price = float(msg['p'])
+                self.price_data.append(price)
+                logger.debug(f"Received price: {price}. Total prices: {len(self.price_data)}")
+        except Exception as e:
+            logger.error(f"Error in fetch_real_time_data: {e}")
+            raise
 
     async def fetch_liquidation_levels(self):
         logger.info("Fetching liquidation levels")
@@ -50,14 +52,18 @@ class FinancialDataFetcher:
             open_interest = await self.binance_client.get_open_interest(self.symbol)
             funding_rate = await self.binance_client.get_funding_rate(self.symbol)
             
-            current_price = self.price_data[-1]
-            self.liquidation_levels = [
-                current_price * (1 + funding_rate * 2),
-                current_price * (1 - funding_rate * 2)
-            ]
-            logger.info(f"Liquidation levels set: {self.liquidation_levels}")
+            if self.price_data:
+                current_price = self.price_data[-1]
+                self.liquidation_levels = [
+                    current_price * (1 + funding_rate * 2),
+                    current_price * (1 - funding_rate * 2)
+                ]
+                logger.info(f"Liquidation levels set: {self.liquidation_levels}")
+            else:
+                logger.warning("No price data available to set liquidation levels")
         except Exception as e:
             logger.error(f"Error fetching liquidation levels: {e}")
+            raise
 
 async def initialize_model_and_data(symbol=SYMBOL, max_retries=5, retry_delay=5, timeout=30):
     for attempt in range(max_retries):

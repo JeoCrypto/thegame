@@ -11,5 +11,13 @@ BASE_URL = "https://fapi.binance.com"
 SYMBOL = "BTCUSDT"
 LEVERAGE = 10
 
+# Screen dimensions
 WIDTH, HEIGHT = 1200, 800
+
+# Colors
 BLACK, WHITE, RED, GREEN, BLUE = (0, 0, 0), (255, 255, 255), (255, 0, 0), (0, 255, 0), (0, 0, 255)
+
+# Game object dimensions
+PADDLE_HEIGHT = 10
+PADDLE_WIDTH = 100
+BALL_RADIUS = 8
