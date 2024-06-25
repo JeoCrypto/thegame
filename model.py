@@ -80,7 +80,8 @@ class AsyncFinancialDataFetcher:
     async def start(self):
         await asyncio.gather(
             self.fetch_real_time_data(),
-            self.update_liquidation_levels()
+            self.update_liquidation_levels(),
+            await asyncio.sleep(1)
         )
 
     async def fetch_real_time_data(self):
