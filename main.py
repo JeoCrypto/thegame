@@ -1,19 +1,24 @@
 import asyncio
 import pygame
 from trading_env import BreakoutEnv
-from model import initialize_model_and_data
+from model import initialize_model_and_data, AdvancedTradingModel
 import torch
 import torch.optim as optim
 from visualization import init_pygame, update_display
-from config import SYMBOL, WIDTH, HEIGHT
+from config import SYMBOL, WIDTH, HEIGHT, API_KEY, API_SECRET, BASE_URL
 import logging
+from binance_client import BinanceClient
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 async def main():
+    # Initialize Binance Client
+    binance_client = BinanceClient(API_KEY, API_SECRET, BASE_URL)
+    logger.info("Binance client initialized.")
+
     try:
-        model, data_fetcher, fetch_task = await initialize_model_and_data(SYMBOL)
+        model, data_fetcher, fetch_task = await initialize_model_and_data(SYMBOL, binance_client)
         logger.info(f"Model initialized. Input size: {model.fc1.in_features}")
     except ValueError as e:
         logger.error(f"Initialization failed: {e}")
@@ -42,17 +47,23 @@ async def main():
             state_tensor = torch.FloatTensor(state).unsqueeze(0)
             logger.debug(f"State tensor shape: {state_tensor.shape}")
 
+            # Reinitialize the model if the input size changes
             expected_size = len(data_fetcher.price_data) + len(data_fetcher.liquidation_levels)
             if state_tensor.shape[1] != expected_size:
                 logger.warning(f"Unexpected state shape: {state_tensor.shape}, expected: (1, {expected_size})")
                 logger.warning(f"Price data length: {len(data_fetcher.price_data)}")
                 logger.warning(f"Liquidation levels length: {len(data_fetcher.liquidation_levels)}")
+
+                # Reinitialize the model
+                model = AdvancedTradingModel(input_size=expected_size, hidden_size=64, output_size=3)
+                optimizer = torch.optim.Adam(model.parameters())
+                logger.info(f"Reinitialized model with input size: {expected_size}")
                 continue
 
             action_probs = model(state_tensor)
             action = torch.argmax(action_probs).item()
 
-            next_state, reward, done, info = env.step(action)
+            next_state, reward, done, info = await env.step(action)
             total_reward += reward
             logger.debug(f"Action: {action}, Reward: {reward}, Done: {done}")
 
@@ -73,6 +84,7 @@ async def main():
                     logger.info("Pygame QUIT event received. Shutting down.")
                     pygame.quit()
                     fetch_task.cancel()
+                    await binance_client.close()
                     return
 
             # Control the frame rate
@@ -83,6 +95,7 @@ async def main():
     logger.info("Training completed. Shutting down.")
     pygame.quit()
     fetch_task.cancel()
+    await binance_client.close()
 
 if __name__ == "__main__":
     try:
@@ -91,4 +104,11 @@ if __name__ == "__main__":
         logger.info("KeyboardInterrupt received. Shutting down.")
     except Exception as e:
         logger.exception(f"An unexpected error occurred: {e}")
+
+
+
+
+
+
+
 

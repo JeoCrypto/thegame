@@ -4,6 +4,7 @@ from gym import spaces
 import numpy as np
 import pygame
 from config import WIDTH, HEIGHT
+import asyncio
 
 class BreakoutEnv(gym.Env):
     def __init__(self, data_fetcher, width=1200, height=800):
@@ -239,5 +240,8 @@ class BreakoutEnv(gym.Env):
                 screen.blit(trade_text, (10, 410 + i * 40))
             
             pygame.display.flip()
+
+
+
 
 

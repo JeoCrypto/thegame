@@ -1,11 +1,10 @@
-# model.py
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import asyncio
 import time
 from collections import deque
-from binance_client import BinanceClient  # Ensure this is correctly implemented
+from binance_client import BinanceClient
 from config import API_KEY, API_SECRET, BASE_URL, SYMBOL
 import logging
 
@@ -24,11 +23,11 @@ class AdvancedTradingModel(nn.Module):
         return self.fc3(x)
 
 class FinancialDataFetcher:
-    def __init__(self, symbol=SYMBOL, max_data_points=1000):
+    def __init__(self, binance_client, symbol=SYMBOL, max_data_points=1000):
         self.symbol = symbol
         self.price_data = deque(maxlen=max_data_points)
         self.liquidation_levels = []
-        self.binance_client = BinanceClient(API_KEY, API_SECRET, BASE_URL)
+        self.binance_client = binance_client
 
     def get_current_state(self):
         if not self.price_data or not self.liquidation_levels:
@@ -65,10 +64,13 @@ class FinancialDataFetcher:
             logger.error(f"Error fetching liquidation levels: {e}")
             raise
 
-async def initialize_model_and_data(symbol=SYMBOL, max_retries=5, retry_delay=5, timeout=30):
+async def initialize_model_and_data(symbol=SYMBOL, binance_client=None, max_retries=5, retry_delay=5, timeout=30):
+    if binance_client is None:
+        binance_client = BinanceClient(API_KEY, API_SECRET, BASE_URL)
+
     for attempt in range(max_retries):
         logger.info(f"Initialization attempt {attempt + 1}/{max_retries}")
-        data_fetcher = FinancialDataFetcher(symbol)
+        data_fetcher = FinancialDataFetcher(binance_client, symbol)
         fetch_task = asyncio.create_task(data_fetcher.fetch_real_time_data())
         
         start_time = time.time()
@@ -104,3 +106,9 @@ async def initialize_model_and_data(symbol=SYMBOL, max_retries=5, retry_delay=5,
         await asyncio.sleep(retry_delay)
     
     raise ValueError("Failed to fetch initial data after multiple attempts")
+
+
+
+
+
+
