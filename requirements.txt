@@ -1,0 +1,6 @@
+gym 
+pygame 
+websockets 
+torch 
+aiohttp 
+python-dotenv
