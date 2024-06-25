@@ -1,65 +1,68 @@
-# main.py
 import asyncio
-import websockets
-import json
+import pygame
+from trading_env import BreakoutEnv
+from model import initialize_model_and_data
 import torch
 import torch.optim as optim
-from collections import deque
-
-from config import SYMBOL, LEVERAGE
-from binance_client import BinanceClient
-from trading_env import TradingEnv
-from model import TradingModel
 from visualization import init_pygame, update_display
+from config import SYMBOL, WIDTH, HEIGHT
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 async def main():
-    binance_client = BinanceClient()
-    env = TradingEnv()
-    model = TradingModel(input_size=5, hidden_size=64, output_size=3)
-    optimizer = optim.Adam(model.parameters())
-    
+    try:
+        model, data_fetcher, fetch_task = await initialize_model_and_data(SYMBOL)
+    except ValueError as e:
+        print(f"Initialization failed: {e}")
+        return
+
+    # Initialize Pygame
     screen = init_pygame()
-    price_data = deque(maxlen=1000)
+    clock = pygame.time.Clock()
 
-    await binance_client.set_leverage(SYMBOL, LEVERAGE)
+    env = BreakoutEnv(data_fetcher, width=WIDTH, height=HEIGHT)
+    optimizer = torch.optim.Adam(model.parameters())
 
-    async def handle_websocket_message(message):
-        data = json.loads(message)
-        price = float(data['p'])
-        price_data.append(price)
-        env.update_data(price)
+    num_episodes = 1000
+    for episode in range(num_episodes):
+        state = env.reset()
+        done = False
+        total_reward = 0
 
-    async with websockets.connect(f"wss://fstream.binance.com/ws/{SYMBOL.lower()}@trade") as websocket:
-        episode = 0
-        while True:
-            state = env.reset()
-            episode_reward = 0
-            done = False
+        while not done:
+            state_tensor = torch.FloatTensor(state).unsqueeze(0)
+            action_probs = model(state_tensor)
+            action = torch.argmax(action_probs).item()
 
-            while not done:
-                message = await websocket.recv()
-                await handle_websocket_message(message)
+            next_state, reward, done, info = env.step(action)
+            total_reward += reward
 
-                state_tensor = torch.FloatTensor(state).unsqueeze(0)
-                action_probs = model(state_tensor)
-                action = torch.argmax(action_probs).item()
+            # Train the model
+            optimizer.zero_grad()
+            loss = -torch.log(action_probs[0][action]) * reward
+            loss.backward()
+            optimizer.step()
 
-                next_state, reward, done, info = env.step(action)
-                episode_reward += reward
+            state = next_state
 
-                # Train the model
-                optimizer.zero_grad()
-                loss = -torch.log(action_probs[0][action]) * reward
-                loss.backward()
-                optimizer.step()
+            # Update the display
+            update_display(screen, env.paddle_x, env.ball_x, env.ball_y, env.blocks, info['score'])
 
-                state = next_state
+            # Handle Pygame events
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    fetch_task.cancel()
+                    return
 
-                update_display(screen, list(price_data), info['balance'], info['position'], episode)
+            # Control the frame rate
+            clock.tick(60)
 
-            print(f"Episode {episode} finished with reward: {episode_reward}")
-            episode += 1
+        print(f"Episode {episode + 1} finished with score: {info['score']} and reward: {total_reward}")
+
+    pygame.quit()
+    fetch_task.cancel()
 
 if __name__ == "__main__":
     asyncio.run(main())
-    

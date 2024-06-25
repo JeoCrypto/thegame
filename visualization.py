@@ -1,28 +1,34 @@
 # visualization.py
+
+# visualization.py
 import pygame
-from config import WIDTH, HEIGHT, BLACK, WHITE, GREEN, RED
+from config import WIDTH, HEIGHT, BLACK, WHITE, RED, GREEN, BLUE
 
 def init_pygame():
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption('Trading Bot Simulation')
+    pygame.display.set_caption('AI Breakout Training')
     return screen
 
-def draw_chart(screen, data, color):
-    if len(data) < 2:
-        return
-    scaled_data = [(i, HEIGHT - (d - min(data)) / (max(data) - min(data)) * HEIGHT) for i, d in enumerate(data)]
-    pygame.draw.lines(screen, color, False, scaled_data, 2)
+def draw_paddle(screen, paddle_x):
+    pygame.draw.rect(screen, WHITE, (paddle_x, HEIGHT - 20, 100, 10))
 
-def draw_text(screen, text, position, color=WHITE, font_size=36):
-    font = pygame.font.Font(None, font_size)
-    text_surface = font.render(text, True, color)
-    screen.blit(text_surface, position)
+def draw_ball(screen, ball_x, ball_y):
+    pygame.draw.circle(screen, WHITE, (int(ball_x), int(ball_y)), 8)
 
-def update_display(screen, price_data, balance, position, episode):
+def draw_blocks(screen, blocks):
+    for block in blocks:
+        pygame.draw.rect(screen, RED, block)
+
+def draw_score(screen, score):
+    font = pygame.font.Font(None, 36)
+    text = font.render(f"Score: {score}", True, WHITE)
+    screen.blit(text, (10, 10))
+
+def update_display(screen, paddle_x, ball_x, ball_y, blocks, score):
     screen.fill(BLACK)
-    draw_chart(screen, price_data, GREEN)
-    draw_text(screen, f"Episode: {episode}", (20, 20))
-    draw_text(screen, f"Balance: {balance:.2f}", (20, 60))
-    draw_text(screen, f"Position: {position}", (20, 100))
+    draw_paddle(screen, paddle_x)
+    draw_ball(screen, ball_x, ball_y)
+    draw_blocks(screen, blocks)
+    draw_score(screen, score)
     pygame.display.flip()
