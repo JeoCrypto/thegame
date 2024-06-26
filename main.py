@@ -128,7 +128,8 @@ async def main():
         await asyncio.sleep(0.1)
 
         if (episode + 1) % save_interval == 0:
-            save_model(model, optimizer, episode + 1)
+            save_model(model, optimizer, episode + 1,
+                       path=f"model_checkpoint.pth")
 
         logger.info("Training completed. Shutting down.")
 
