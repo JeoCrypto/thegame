@@ -6,10 +6,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Binance API credentials
-API_KEY = os.getenv(
-    "BINANCE_API_KEY", "uKQtYQWg6wERwMP2gZmXGVoxW2IGx2iPomvUXLVd8hA0awdFyifgBjaQcezWaLiS")
-API_SECRET = os.getenv(
-    "BINANCE_API_SECRET", "p6xRauRC2NmD3JMzrHKFDnUKln2xxQ8pyISDDnrShK4smI8vIsqgaWGfeDRCqvHh")
+API_KEY = os.getenv("BINANCE_API_KEY", "uKQtYQWg6wERwMP2gZmXGVoxW2IGx2iPomvUXLVd8hA0awdFyifgBjaQcezWaLiS")
+API_SECRET = os.getenv("BINANCE_API_SECRET", "p6xRauRC2NmD3JMzrHKFDnUKln2xxQ8pyISDDnrShK4smI8vIsqgaWGfeDRCqvHh")
 BASE_URL = "https://fapi.binance.com"
 
 # Trading settings
@@ -25,6 +23,7 @@ WHITE = (255, 255, 255)
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
+ORANGE = (255, 165, 0)  # Added ORANGE color
 
 # Game object dimensions
 PADDLE_HEIGHT = 10
