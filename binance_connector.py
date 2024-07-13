@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 import logging
 import asyncio
 import aiohttp
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
